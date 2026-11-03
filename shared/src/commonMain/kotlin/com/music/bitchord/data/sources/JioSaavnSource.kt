@@ -1,8 +1,10 @@
 package com.music.bitchord.data.sources
 
-import com.music.bitchord.data.DebugLog
 import com.music.bitchord.data.http.Http
 import com.music.bitchord.data.model.Song
+import io.ktor.http.Url
+import io.ktor.http.URLProtocol
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -10,7 +12,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.longOrNull
 
 /**
  * Port of upstream `data/sources/JioSaavnSource.kt`.
@@ -47,11 +48,11 @@ class JioSaavnSource internal constructor(
      * endpoint, and a server that answers a search is the only thing actually
      * being relied on.
      */
-    override suspend fun health(): SourceHealth = runCatching { searchRows(HEALTH_QUERY, 1) }
-        .fold(
-            onSuccess = { SourceHealth.Ok("Reachable") },
-            onFailure = { SourceHealth.Unreachable(it.message ?: "Unreachable") },
-        )
+    override suspend fun health(): SourceHealth = try {
+        searchRows(HEALTH_QUERY, 1)
+        SourceHealth.Ok("Catalogue reachable; playback availability is checked per track")
+    } catch (e: CancellationException) { throw e }
+    catch (_: Exception) { SourceHealth.Unreachable("Catalogue unavailable") }
 
     /**
      * Rows for [query], explicit versions first.
@@ -69,9 +70,9 @@ class JioSaavnSource internal constructor(
     ): List<Song> {
         val trimmed = query.trim()
         if (trimmed.isEmpty()) return emptyList()
-        val rows = runCatching { searchRows(trimmed, limit.coerceAtLeast(MIN_FETCH)) }
-            .onFailure { DebugLog.w("JioSaavn search failed: ${it.message}") }
-            .getOrNull() ?: return emptyList()
+        val rows = try { searchRows(trimmed, limit.coerceAtLeast(MIN_FETCH)) }
+        catch (e: CancellationException) { throw e }
+        catch (_: Exception) { return emptyList() }
         return rows
             .sortedWith(
                 compareByDescending<JioSaavnRow> { it.explicit }
@@ -90,21 +91,35 @@ class JioSaavnSource internal constructor(
      * does not.
      */
     override suspend fun stream(trackId: String, request: StreamRequest): SourceStream? {
-        val song = runCatching { fetchSong(trackId) }
-            .onFailure { DebugLog.d("JioSaavn song failed: ${it.message}") }
-            .getOrNull() ?: return null
         val cap = request.kbpsCeiling
-        val bitrate = listOf(320, 160, 96, 48).firstOrNull { cap == null || it <= cap } ?: return null
+        if (cap != null && cap < 48) return null
+        val song = try { fetchSong(trackId) }
+        catch (e: CancellationException) { throw e }
+        catch (_: Exception) { return null } ?: return null
+        val bitrate = listOf(320, 160, 96, 48).firstOrNull {
+            (cap == null || it <= cap) && (it != 320 || song.has320 != false)
+        } ?: return null
         val encrypted = song.encryptedMediaUrl ?: return null
         val response = api("song.generateAuthToken", mapOf("url" to encrypted, "bitrate" to bitrate.toString()))
-        val url = (response as? JsonObject)?.str("auth_url")
-            ?.takeIf { it.startsWith("https://") } ?: return null
+        val token = response as? JsonObject ?: return null
+        // A refusal is terminal. Do not decrypt the opaque value locally, invent
+        // CDN filenames, or keep requesting tokens at other qualities after it.
+        if (token.str("status")?.lowercase()?.let { it != "success" } == true) return null
+        val url = token.str("auth_url")?.takeIf { raw ->
+            raw.startsWith("https://", ignoreCase = true) &&
+                raw.drop(8).takeWhile { it !in "/?#" }.isNotBlank() &&
+                raw.none { it.isWhitespace() || it == '\\' } &&
+                runCatching { Url(raw) }.getOrNull()?.let {
+                    it.protocol == URLProtocol.HTTPS && it.host.isNotBlank() &&
+                        it.user == null && it.password == null
+                } == true
+        } ?: return null
         return SourceStream(
             url = url,
             // JioSaavn serves AAC in an MP4 container, so the container is what
             // actually matters to the engine and to the extension a download writes.
             format = StreamFormat(codec = "aac", kbps = bitrate),
-            belowRequest = false,
+            belowRequest = request is StreamRequest.Lossless,
             durationSec = song.durationSec,
             sourceConfigId = config.id,
         )
@@ -128,10 +143,9 @@ class JioSaavnSource internal constructor(
 
     private suspend fun fetchSong(trackId: String): JioSaavnRow? {
         val root = api("song.getDetails", mapOf("pids" to trackId)) as? JsonObject ?: return null
-        val song = (root["songs"] as? JsonArray)?.firstOrNull() as? JsonObject
-            ?: root.values.filterIsInstance<JsonObject>().firstOrNull()
-            ?: return null
-        return song.toRow()
+        val songs = (root["songs"] as? JsonArray)?.filterIsInstance<JsonObject>()
+            ?: root.values.filterIsInstance<JsonObject>()
+        return songs.firstOrNull { it.str("id") == trackId }?.toRow()
     }
 
     /**
@@ -171,6 +185,7 @@ class JioSaavnSource internal constructor(
             durationSec = durationSec,
             artworkUrl = artwork,
             encryptedMediaUrl = info.str("encrypted_media_url"),
+            has320 = info.bool("320kbps"),
         )
     }
 
@@ -178,7 +193,13 @@ class JioSaavnSource internal constructor(
         (get(key) as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
 
     private fun JsonObject.bool(key: String): Boolean? =
-        (get(key) as? JsonPrimitive)?.let { it.booleanOrNull ?: it.contentOrNull?.toBooleanStrictOrNull() }
+        (get(key) as? JsonPrimitive)?.let {
+            it.booleanOrNull ?: when (it.contentOrNull?.lowercase()) {
+                "true", "1" -> true
+                "false", "0" -> false
+                else -> null
+            }
+        }
 
     private fun JsonElement?.asStringList(key: String): List<String> =
         (this as? JsonArray)?.mapNotNull { entry ->
@@ -209,6 +230,7 @@ internal data class JioSaavnRow(
     val durationSec: Int?,
     val artworkUrl: String?,
     val encryptedMediaUrl: String? = null,
+    val has320: Boolean? = null,
 ) {
     fun toSong(configId: String): Song = Song(
         // The identity is the route back to this source, packed into the one field

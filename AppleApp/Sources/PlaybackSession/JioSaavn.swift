@@ -1,14 +1,13 @@
 import Foundation
-import CommonCrypto
 import BitChordShared
 
-/// JioSaavn search + stream — same unofficial catalogue API as upstream
-/// `JioSaavnService`. DES decrypt uses Apple CommonCrypto.
+/// JioSaavn catalogue search. Playback uses the shared provider resolver.
 enum JioSaavn {
     private static let base = "https://www.jiosaavn.com/api.php"
     private static let ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
 
     static func search(_ query: String) async -> [SearchHitDTO] {
+        guard enabled, !Task.isCancelled else { return [] }
         var comps = URLComponents(string: base)!
         comps.queryItems = [
             .init(name: "__call", value: "search.getResults"),
@@ -22,9 +21,12 @@ enum JioSaavn {
         ]
         guard let url = comps.url else { return [] }
         var req = URLRequest(url: url)
+        req.timeoutInterval = 12
         req.setValue(ua, forHTTPHeaderField: "User-Agent")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
-        guard let (data, _) = try? await URLSession.shared.data(for: req),
+        guard let (data, response) = try? await URLSession.shared.data(for: req),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              enabled, !Task.isCancelled,
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let results = obj["results"] as? [[String: Any]] else { return [] }
         return results.compactMap { raw in
@@ -60,38 +62,20 @@ enum JioSaavn {
         }
     }
 
-    static func streamURL(for trackId: String) async -> (url: String, kbps: Int)? {
-        let id = trackId.hasPrefix("saavn:") ? String(trackId.dropFirst(6)) : trackId
-        var comps = URLComponents(string: base)!
-        comps.queryItems = [
-            .init(name: "__call", value: "song.getDetails"),
-            .init(name: "_format", value: "json"),
-            .init(name: "_marker", value: "0"),
-            .init(name: "api_version", value: "4"),
-            .init(name: "ctx", value: "android"),
-            .init(name: "pids", value: id),
-        ]
-        guard let url = comps.url else { return nil }
-        var req = URLRequest(url: url)
-        req.setValue(ua, forHTTPHeaderField: "User-Agent")
-        guard let (data, _) = try? await URLSession.shared.data(for: req),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        let song: [String: Any]?
-        if let songs = root["songs"] as? [[String: Any]] {
-            song = songs.first
-        } else {
-            song = root.values.first { $0 is [String: Any] } as? [String: Any]
+    static var enabled: Bool { SourceResolverBridge.shared.jioSaavnEnabled() }
+
+    static func streamURL(for trackId: String, downloadQuality: String? = nil) async -> (url: String, kbps: Int)? {
+        let stream: SourceSubstitution.Stream? = await withCheckedContinuation { continuation in
+            SourceResolverBridge.shared.resolveJioSaavnTrack(
+                trackId: trackId,
+                downloadQuality: downloadQuality,
+                callback: JioStreamAdapter { json, _ in
+                    continuation.resume(returning: json.flatMap(SourceSubstitution.decode))
+                }
+            )
         }
-        guard let song,
-              let info = song["more_info"] as? [String: Any],
-              let encrypted = info["encrypted_media_url"] as? String,
-              let decrypted = decryptDES(encrypted) else { return nil }
-        let has320 = (info["320kbps"] as? String)?.lowercased() == "true"
-        if has320, let range = decrypted.range(of: #"_(48|96|160|320)\.(mp4|aac|mp3)$"#, options: .regularExpression) {
-            let ext = decrypted[range].split(separator: ".").last.map(String.init) ?? "mp4"
-            return (decrypted.replacingCharacters(in: range, with: "_320.\(ext)"), 320)
-        }
-        return (decrypted, 160)
+        guard !Task.isCancelled, let stream else { return nil }
+        return (stream.url, stream.kbps ?? 0)
     }
 
     /// Upstream `matchAndStream` for this catalogue: search, score, then open
@@ -119,25 +103,10 @@ enum JioSaavn {
         return (stream.url, stream.kbps, TrackMatch.seconds(of: hits[index].durationText))
     }
 
-    private static func decryptDES(_ b64: String) -> String? {
-        guard let data = Data(base64Encoded: b64) else { return nil }
-        let key = Array("38346591".utf8)
-        var out = [UInt8](repeating: 0, count: data.count + kCCBlockSizeDES)
-        var outLen = 0
-        let status = data.withUnsafeBytes { raw in
-            key.withUnsafeBufferPointer { keyBuf in
-                CCCrypt(
-                    CCOperation(kCCDecrypt),
-                    CCAlgorithm(kCCAlgorithmDES),
-                    CCOptions(kCCOptionECBMode | kCCOptionPKCS7Padding),
-                    keyBuf.baseAddress, kCCKeySizeDES,
-                    nil,
-                    raw.baseAddress, data.count,
-                    &out, out.count, &outLen
-                )
-            }
-        }
-        guard status == kCCSuccess else { return nil }
-        return String(bytes: out.prefix(outLen), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
+}
+
+private final class JioStreamAdapter: SourceResolverBridgeStreamCallback {
+    private let handler: (String?, String?) -> Void
+    init(_ handler: @escaping (String?, String?) -> Void) { self.handler = handler }
+    func onResult(json: String?, message: String?) { handler(json, message) }
 }

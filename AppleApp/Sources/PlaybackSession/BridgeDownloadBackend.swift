@@ -8,7 +8,8 @@ struct BridgeDownloadBackend: DownloadBackend {
     }
     func resolve(_ entry: QueueEntry, quality: String, youtubeFallback: Bool) async throws -> String {
         let duration = entry.durationSeconds > 0 ? Int(entry.durationSeconds.rounded()) : nil
-        if !youtubeFallback, let selected = await SourceSubstitution.forDownload(title: entry.title, artist: entry.artist,
+        if !youtubeFallback, !entry.source.hasPrefix("saavn:"), !entry.id.hasPrefix("saavn:"),
+           let selected = await SourceSubstitution.forDownload(title: entry.title, artist: entry.artist,
             durationSec: duration, album: entry.albumName,
             isExplicit: entry.isExplicit.map { KotlinBoolean(value: $0) }, quality: quality) {
             try Task.checkCancellation()
@@ -20,7 +21,7 @@ struct BridgeDownloadBackend: DownloadBackend {
         try Task.checkCancellation()
         if entry.source.hasPrefix("saavn:") || entry.id.hasPrefix("saavn:") {
             let id = String((entry.source.hasPrefix("saavn:") ? entry.source : entry.id).dropFirst(6))
-            if let stream = await JioSaavn.streamURL(for: id) {
+            if let stream = await JioSaavn.streamURL(for: id, downloadQuality: quality) {
                 return try encode(url: stream.url, headers: [:], provider: "jiosaavn", identity: id,
                     codec: "MP4", kbps: stream.kbps, lossless: false)
             }

@@ -834,11 +834,18 @@ struct SongRow: View {
                         .lineLimit(titleLines)
                     if active { PlayingBars() }
                 }
-                if !entry.artist.isEmpty {
-                    Text(entry.artist)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(titleLines)
+                HStack(spacing: 6) {
+                    if entry.source.hasPrefix("saavn:") {
+                        Text("JioSaavn")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    if !entry.artist.isEmpty {
+                        Text(entry.artist)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(titleLines)
+                    }
                 }
             }
             Spacer(minLength: 8)
@@ -884,6 +891,7 @@ struct SongRow: View {
     /// One sentence for the whole row, in the order a person would say it.
     private var accessibilityLabel: String {
         var parts = [entry.title]
+        if entry.source.hasPrefix("saavn:") { parts.append("JioSaavn") }
         if !entry.artist.isEmpty { parts.append(entry.artist) }
         if let duration = entry.durationText, !duration.isEmpty { parts.append(duration) }
         if buffering { parts.append("Buffering") }

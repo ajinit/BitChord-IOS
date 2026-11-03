@@ -83,16 +83,13 @@ object StreamResolver {
         }
     }
     /**
-     * YouTube's "Sign in to confirm you're not a bot": a verdict on the network
-     * address, not on any track. Every client gets it, so walking clients,
-     * rebuilding the session or trying another copy only adds traffic from an
-     * address already under suspicion. It is told apart from an ordinary miss
-     * by one anonymous player request, and then nothing more is asked of
-     * YouTube for [BOT_CHECK_BACKOFF] — a network change or a little patience
-     * is what clears it.
+     * An anonymous diagnostic player request returned "not a bot" after
+     * extraction failed. This does not identify the original extraction failure
+     * or prove an IP-address problem. Back off for [BOT_CHECK_BACKOFF] rather
+     * than repeatedly requesting audio from a service that has refused it.
      */
     class BotCheckException : IllegalStateException(
-        "YouTube asks this network to sign in to confirm it is not a bot"
+        "YouTube requested sign-in to confirm it is not a bot"
     )
     private val botCheckedUntil = AtomicReference<TimeMark?>(null)
     private val BOT_CHECK_BACKOFF = 120.seconds
@@ -122,7 +119,7 @@ object StreamResolver {
         }
         if (!reason.contains("not a bot", ignoreCase = true)) return false
         botCheckedUntil.store(TimeSource.Monotonic.markNow() + BOT_CHECK_BACKOFF)
-        DebugLog.w("YouTube is bot-checking this network; not asking again for ${BOT_CHECK_BACKOFF.inWholeSeconds}s")
+        DebugLog.w("YouTube returned a bot check; backing off for ${BOT_CHECK_BACKOFF.inWholeSeconds}s")
         return true
     }
 

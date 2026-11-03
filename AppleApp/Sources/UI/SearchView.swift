@@ -1911,7 +1911,7 @@ struct SearchView: View {
             do {
                 let page = try await InnertubeSearch.shared.searchPage(term, scope: wanted.rawValue)
                 var found = page.hits
-                if PlatformSettings.shared.getBoolean(key: "jiosaavn_enabled", default: true), wanted == .songs {
+                if JioSaavn.enabled, wanted == .songs {
                     let extra = await JioSaavn.search(term)
                     found.insert(contentsOf: extra, at: 0)
                 }
@@ -1922,10 +1922,11 @@ struct SearchView: View {
                 hits = found
                 searchContinuationToken = page.continuation
             } catch {
+                let extra = wanted == .songs ? await JioSaavn.search(term) : []
                 guard !Task.isCancelled else { return }
                 AuthController.reportIfSessionExpired(error)
-                searchError = "Couldn't reach the music service. Check your connection and try again."
-                hits = []
+                searchError = extra.isEmpty ? "Couldn't reach the music service. Check your connection and try again." : nil
+                hits = extra
                 searchContinuationToken = nil
             }
             searching = false

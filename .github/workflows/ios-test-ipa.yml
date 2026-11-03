@@ -1,0 +1,99 @@
+name: Build unsigned iPhone test IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [build/ios-test]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # Apple Silicon is required by the repository's native framework builder.
+    # The source weak-links MusicUnderstanding from the Xcode 27 SDK.
+    runs-on: xcode-27
+    timeout-minutes: 180
+    env:
+      CONFIG: release
+      CARGO_BUILD_JOBS: 2
+      CARGO_INCREMENTAL: 0
+      NATIVE_TARGETS: aarch64-apple-darwin aarch64-apple-ios
+      GRADLE_OPTS: -Dorg.gradle.workers.max=2 -Dorg.gradle.jvmargs=-Xmx3g
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Check Apple build environment
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          df -h .
+          if ! command -v xcodegen >/dev/null 2>&1; then brew install xcodegen; fi
+          if ! command -v cmake >/dev/null 2>&1; then brew install cmake; fi
+          rustup target add aarch64-apple-darwin aarch64-apple-ios
+          chmod +x gradlew
+
+      - name: Test source resolution and recovery
+        run: |
+          set -euo pipefail
+          bash scripts/check-source-recovery.sh
+          ./gradlew :shared:macosArm64Test --max-workers=2
+          ./gradlew --stop
+
+      - name: Build shared Apple framework
+        run: |
+          set -euo pipefail
+          bash scripts/build-shared-framework.sh
+          ./gradlew --stop
+
+      - name: Build native audio framework
+        run: bash scripts/build-native-core.sh
+
+      - name: Generate Xcode project and archive unsigned IPA
+        run: |
+          set -euo pipefail
+          xcodegen generate --spec AppleApp/project.yml
+          bash scripts/package-ios-ipa.sh 1.0.4 --output-dir build/test-ipa
+          shasum -a 256 build/test-ipa/*.ipa > build/test-ipa/SHA256.txt
+          {
+            echo 'BitChord iPhone playback test build - unsigned'
+            echo "Source commit: $GITHUB_SHA"
+            echo "Build job: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo 'Sign and install the IPA with Sideloadly on Windows.'
+            echo 'Apple compilation is checked here; on-device playback remains unverified.'
+          } > build/test-ipa/BUILD.txt
+
+      - name: Upload sideloading package
+        uses: actions/upload-artifact@v4
+        with:
+          name: BitChord-iPhone-test-${{ github.run_number }}
+          path: build/test-ipa/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload test and build diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BitChord-build-diagnostics-${{ github.run_number }}
+          path: |
+            shared/build/reports/tests/
+            shared/build/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
