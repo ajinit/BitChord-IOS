@@ -16,6 +16,10 @@ struct RootView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(AuthController.self) private var auth
     @Environment(ToastCenter.self) private var toast
+    @State private var playbackFailure: String = ""
+    @State private var showingPlaybackFailure = false
+    @State private var playbackFailureURL: URL?
+    @Environment(\.openURL) private var openURL
     @State private var updateChecker = UpdateChecker.shared
     #if os(macOS)
     /// Which side panel is open beside the library, if any (M4).
@@ -239,16 +243,22 @@ struct RootView: View {
             // reason upstream puts `QueueActionNoticeHost` above everything else.
             ToastHost()
         }
-        // Playback failures are reported here rather than as a banner inside each
-        // feed. `lastError` is a *playback* error — "Audio engine failed to start"
-        // has nothing to do with a feed that happened to be on screen — and it
-        // used to be rendered as a hard-coded red bar at the top of Home,
-        // Explore and Search results, which is both the wrong place and the wrong
-        // severity for a transient failure.
+        // Keep the full failure readable; the two-line toast hid recovery advice.
         .onChange(of: controller.lastError) { _, message in
             guard let message, !message.isEmpty else { return }
-            toast.show(message, kind: .failure)
+            playbackFailureURL = controller.current.flatMap { YouTubePlaybackLink.url(source: $0.source) }
+            playbackFailure = message
+            showingPlaybackFailure = true
         }
+        .alert("Playback unavailable", isPresented: $showingPlaybackFailure) {
+            if let url = playbackFailureURL {
+                Button("Open in YouTube Music") { openURL(url) }
+            }
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(playbackFailure)
+        }
+
     }
 
     @ViewBuilder

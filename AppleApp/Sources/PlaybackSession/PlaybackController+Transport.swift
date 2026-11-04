@@ -380,8 +380,8 @@ extension PlaybackController {
     /// recommendation tail keep their places when playback mode changes.
     func applyListOrder() {
         queue = PlaybackQueuePolicy.orderList(
-            queue, after: playingIndex, automix: automixSequencingEnabled,
-            shuffle: shuffleEnabled, scores: tasteScores(queue)
+            queue, after: playingIndex, automix: automixSequencingEnabled && automixPlaybackReady,
+            shuffle: shuffleEnabled, scores: automixPlaybackReady ? tasteScores(queue) : []
         )
         queueEditRevision &+= 1
         persistSession()

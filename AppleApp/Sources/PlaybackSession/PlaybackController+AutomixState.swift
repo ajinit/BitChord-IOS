@@ -12,6 +12,11 @@ import AppKit
 
 // AutoMix UI state: the adopted plan, the smart window, and artwork.
 extension PlaybackController {
+    var automixPlaybackReady: Bool {
+        AutomixReadiness.canPrepare(currentID: current?.id, loadedID: engineLoadedId,
+            source: loadedSourcePath, transportReady: state == .playing || state == .paused)
+    }
+
     func adoptAutomixPlan(_ plan: TransitionPlanRec) {
         pendingAutomixPlan = plan
         let rateNote = abs(plan.playbackRate - 1) > 0.001

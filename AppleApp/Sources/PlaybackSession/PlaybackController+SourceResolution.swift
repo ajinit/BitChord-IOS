@@ -69,7 +69,6 @@ extension PlaybackController {
     struct ResolvePrefs: Sendable {
         let maxKbps: Int
         let wantLossless: Bool
-        let jiosaavn: Bool
         let canSubstitute: Bool
         let preferMusicOnly: Bool
 
@@ -80,7 +79,6 @@ extension PlaybackController {
             return ResolvePrefs(
                 maxKbps: Int(NetworkQuality.shared.maxKbps),
                 wantLossless: streamQuality == "LOSSLESS",
-                jiosaavn: PlatformSettings.shared.getBoolean(key: "jiosaavn_enabled", default: true),
                 canSubstitute: QualityUpgrade.canSubstituteForYouTube(),
                 preferMusicOnly: PlatformSettings.shared.getBoolean(key: "prefer_music_only", default: false)
             )
@@ -124,12 +122,13 @@ extension PlaybackController {
                 return ResolveOutcome(
                     source: ResolvedSource(
                         source: hit.url, headers: [:], kbps: hit.kbps,
-                        lossless: false, origin: .substitute
+                        lossless: false, codec: "aac", origin: .substitute
                     ),
                     leftover: nil
                 )
             }
-            throw InnertubeStreamResolver.StreamError(message: "JioSaavn had no stream")
+            try Task.checkCancellation()
+            throw InnertubeStreamResolver.StreamError(message: "JioSaavn could not serve this track. Check that it is enabled in Sources and available at your selected quality. YouTube was not used for this choice.")
         }
         if entry.source.hasPrefix("src:") || entry.id.hasPrefix("src:") {
             // An addon search row keeps its own `src:` key rather than a video
@@ -241,6 +240,12 @@ extension PlaybackController {
             try await Self.resolveYouTube(videoId: videoId, prefs: prefs)
         }
 
+        func youtubeOrRecover() async throws -> ResolvedSource {
+            try await PlaybackSourceRecovery.value(of: fallback) { error in
+                try await recoverRefusedTrack(entry, videoId: videoId, prefs: prefs, lookup: lookup, error: error)
+            }
+        }
+
         // Prefer-music-only for a music video: the video's own upload is the
         // wrong answer when the catalogue audio was asked for, so the race is
         // not run at all — the substitute lookup is awaited, and YouTube's
@@ -249,7 +254,7 @@ extension PlaybackController {
         // happens before anything starts, so the video never plays first.
         if prefs.preferMusicOnly, entry.isVideo {
             if let stream = await lookup.value {
-                _ = try await fallback.value
+                _ = try await youtubeOrRecover()
                 let selected = ResolveOutcome(
                     source: ResolvedSource(
                         source: stream.url, headers: stream.headers,
@@ -270,7 +275,7 @@ extension PlaybackController {
                 }
                 PlaybackDebugLog.shared.record("music-only candidate rejected: recording identity could not be verified", about: videoId)
             }
-            let source = try await fallback.value
+            let source = try await youtubeOrRecover()
             await latencyResolved?(source.resolutionAt ?? ProcessInfo.processInfo.systemUptime,
                                    "cold", source.clientName ?? "unknown")
             return ResolveOutcome(source: source, leftover: nil, decisionNote: source.lossless
@@ -286,7 +291,7 @@ extension PlaybackController {
         case .preferred(let stream):
             // Metadata identifies a candidate, not its audio. The selected
             // upload remains the reference while the upgrade path verifies it.
-            let source = try await fallback.value
+            let source = try await youtubeOrRecover()
             await latencyResolved?(source.resolutionAt ?? ProcessInfo.processInfo.systemUptime, "cold", source.clientName ?? "YouTube")
             return ResolveOutcome(source: source, leftover: Task { stream },
                 decisionNote: "A preferred copy is waiting for recording verification.")
@@ -301,21 +306,10 @@ extension PlaybackController {
         case .timedOut:
             // The selected YouTube upload carries first sound; the patient
             // lookup stays available to the verified quality-upgrade path.
-            do {
-                let source = try await fallback.value
-                await latencyResolved?(source.resolutionAt ?? ProcessInfo.processInfo.systemUptime,
-                                       "cold", source.clientName ?? "unknown")
-                return ResolveOutcome(source: source, leftover: lookup, decisionNote: report.explanation ?? (prefs.canSubstitute
-                ? "Preferred sources did not provide a verified stream before the playback deadline."
-                : "YouTube is the selected source."))
-            } catch {
-                // The lookup is the first thing to fall back on now, so it is
-                // awaited rather than cancelled.
-                let source = try await recoverRefusedTrack(entry, videoId: videoId, prefs: prefs, lookup: lookup, error: error)
-                await latencyResolved?(ProcessInfo.processInfo.systemUptime, "cold", source.clientName ?? "recovered")
-                return ResolveOutcome(source: source, leftover: nil, decisionNote: source.lossless
-                ? "A preferred source supplied verified lossless audio." : report.explanation)
-            }
+            let source = try await youtubeOrRecover()
+            await latencyResolved?(source.resolutionAt ?? ProcessInfo.processInfo.systemUptime,
+                                   "cold", source.clientName ?? "unknown")
+            return ResolveOutcome(source: source, leftover: lookup, decisionNote: report.explanation)
         case .cancelled:
             lookup.cancel()
             fallback.cancel()
@@ -323,12 +317,7 @@ extension PlaybackController {
         case .none:
             // Preserve the resolver's actual failure instead of replacing
             // account/CDN errors with an uninformative "No stream".
-            let source: ResolvedSource
-            do {
-                source = try await fallback.value
-            } catch {
-                source = try await recoverRefusedTrack(entry, videoId: videoId, prefs: prefs, lookup: lookup, error: error)
-            }
+            let source = try await youtubeOrRecover()
             await latencyResolved?(source.resolutionAt ?? ProcessInfo.processInfo.systemUptime,
                                    "cold", source.clientName ?? "unknown")
             return ResolveOutcome(source: source, leftover: nil, decisionNote: source.lossless
@@ -336,19 +325,27 @@ extension PlaybackController {
         }
     }
 
-    /// What plays when YouTube refused every way this app has of asking for a
-    /// track: the same recording from another enabled catalogue, or else the
-    /// track's YouTube Music counterpart — the Song/Video pairing YouTube itself
-    /// publishes — when its length agrees with the song's. Only when both miss
-    /// does the original failure stand, and the queue moves on.
+    /// Retain a catalogue candidate for verification and explain why it cannot
+    /// replace refused reference audio. Non-bot failures may try YouTube's
+    /// published Song/Video counterpart when its length agrees.
     private static func recoverRefusedTrack(
         _ entry: QueueEntry, videoId: String, prefs: ResolvePrefs,
         lookup: Task<QualityUpgrade.Candidate?, Never>, error: Error
     ) async throws -> ResolvedSource {
-        if let stream = await lookup.value { QualityUpgrade.shelve(videoId, stream: stream) }
-        // The counterpart is another YouTube ask, which a bot check refuses too.
-        if !InnertubeStreamResolver.StreamError.isBotCheck(error),
-           let twin = await counterpart(of: entry, videoId: videoId) {
+        try Task.checkCancellation()
+        let candidate = await lookup.value
+        try Task.checkCancellation()
+        if let candidate { QualityUpgrade.shelve(videoId, stream: candidate) }
+        if InnertubeStreamResolver.StreamError.isBotCheck(error) {
+            let reason = candidate != nil
+                ? "An alternative was found, but BitChord cannot verify that it is the same recording without the original audio."
+                : "Enabled sources did not supply a verified replacement."
+            throw InnertubeStreamResolver.StreamError(
+                message: "YouTube refused audio with a bot-verification request. \(reason) Use Open in YouTube Music to open this recording in the official service, or select a track directly from another source.",
+                raw: (error as? InnertubeStreamResolver.StreamError)?.raw ?? String(describing: error)
+            )
+        }
+        if let twin = await counterpart(of: entry, videoId: videoId) {
             do {
                 var source = try await resolveYouTube(videoId: twin, prefs: prefs)
                 source.clientName = "counterpart " + (source.clientName ?? "unknown")

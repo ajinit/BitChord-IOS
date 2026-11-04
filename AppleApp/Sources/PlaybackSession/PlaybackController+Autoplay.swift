@@ -140,7 +140,7 @@ extension PlaybackController {
     func scheduleSequencing() {
         sequencingTask?.cancel()
         sequencingGeneration &+= 1
-        guard automixSequencingEnabled, let current else { return }
+        guard automixSequencingEnabled, automixPlaybackReady, let current else { return }
         let generation = sequencingGeneration
         let snapshot = queue
         let index = playingIndex

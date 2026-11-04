@@ -427,11 +427,12 @@ struct SearchView: View {
     /// Upstream's Library is the Local Music folder alone; ours also holds the
     /// signed-in library, so this one searches both.
     enum SearchSource: String, CaseIterable, Identifiable, Codable {
-        case youtube, library, addons
+        case youtube, jiosaavn, library, addons
         var id: String { rawValue }
         var label: String {
             switch self {
             case .youtube: return "YouTube"
+            case .jiosaavn: return "JioSaavn"
             case .library: return "Library"
             case .addons: return "Addons"
             }
@@ -772,13 +773,8 @@ struct SearchView: View {
     private var resultsColumn: some View {
         VStack(spacing: 0) {
             #if os(iOS)
-            // The phone keeps upstream's picker above the results, up only
-            // while the field is empty: once something is typed the page is
-            // about the results, and the picker would only push them down. On a
-            // regular-width iPad and on the Mac it lives in the titlebar,
-            // beside the search field, where it pushes nothing and stays
-            // reachable.
-            if horizontalSizeClass != .regular, term.isEmpty {
+            // Keep catalogue selection reachable after a query is entered.
+            if horizontalSizeClass != .regular {
                 sourceSwitcher
                     .padding(.horizontal, 16)
                     .padding(.bottom, 10)
@@ -786,6 +782,7 @@ struct SearchView: View {
             #endif
             switch searchSource {
             case .youtube: youtubeResultsColumn
+            case .jiosaavn: jioResultsColumn
             case .library: libraryResultsColumn
             case .addons: addonResultsColumn
             }
@@ -829,6 +826,32 @@ struct SearchView: View {
     /// left open would otherwise keep saying "No addons yet" after one was added.
     private func refreshAddonCount() {
         addonCount = Int(SourceResolverBridge.shared.addonCount())
+    }
+
+    private var jioResultsColumn: some View {
+        VStack {
+            if !JioSaavn.enabled {
+                EmptyStateView(icon: Image(.bchSearch), title: "JioSaavn is off",
+                    subtitle: "Enable JioSaavn in Settings → Sources, then search here again.", buttonTitle: nil, action: nil)
+            } else if searching {
+                ProgressView("Searching JioSaavn…")
+            } else if let searchError {
+                EmptyStateView(icon: Image(.bchSearch), title: "JioSaavn unavailable",
+                    subtitle: searchError, buttonTitle: nil, action: nil)
+            } else if attempted && hits.isEmpty {
+                EmptyStateView(icon: Image(.bchSearch), title: "No JioSaavn matches",
+                    subtitle: "Try a song title or artist. This catalogue may not carry the recording you want.", buttonTitle: nil, action: nil)
+            } else if !hits.isEmpty {
+                List {
+                    Section("JioSaavn • plays directly from this source") {
+                        ForEach(hits) { hit in searchHitRow(hit) }
+                    }
+                }.listStyle(.plain)
+            } else {
+                EmptyStateView(icon: Image(.bchSearch), title: "Search JioSaavn",
+                    subtitle: "Enter a song title or artist. Results here play from JioSaavn.", buttonTitle: nil, action: nil)
+            }
+        }
     }
 
     private var youtubeResultsColumn: some View {
@@ -1772,8 +1795,8 @@ struct SearchView: View {
                 query = entity.title
                 Task { await performSearch() }
             } else {
-                controller.playRadio(QueueEntry.youtube(
-                    videoId: entity.id, title: entity.title,
+                controller.playRadio(QueueEntry.catalogue(
+                    key: entity.id, title: entity.title,
                     artist: entity.subtitle, thumbnailUrl: entity.artworkUrl
                 ))
             }
@@ -1881,7 +1904,7 @@ struct SearchView: View {
         let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !term.isEmpty else { return }
         switch searchSource {
-        case .youtube: break
+        case .youtube, .jiosaavn: break
         // The library answers as the field is typed into, from what is
         // already loaded; there is nothing for a submit to fetch.
         case .library: return
@@ -1907,24 +1930,24 @@ struct SearchView: View {
         requestToken &+= 1
         searchedTerm = term
         let wanted = scope
+        let catalogue = searchSource
         let task = Task { @MainActor in
             do {
-                let page = try await InnertubeSearch.shared.searchPage(term, scope: wanted.rawValue)
-                var found = page.hits
-                if PlatformSettings.shared.getBoolean(key: "jiosaavn_enabled", default: true), wanted == .songs {
-                    let extra = await JioSaavn.search(term)
-                    found.insert(contentsOf: extra, at: 0)
-                }
-                // Cancellation can arrive while the network call is in flight, so
-                // the guard is checked again here rather than trusted to have been
-                // checked before the request.
-                guard !Task.isCancelled else { return }
-                hits = found
+                let page = try await CatalogueSearch.run(
+                    directJio: catalogue == .jiosaavn,
+                    includeJio: JioSaavn.enabled && (wanted == .all || wanted == .songs),
+                    youtube: { try await InnertubeSearch.shared.searchPage(term, scope: wanted.rawValue) },
+                    jio: { try await JioSaavn.searchChecked(term) },
+                    makePage: { SearchPageDTO(hits: $0, continuation: nil) },
+                    prepend: { extra, page in SearchPageDTO(hits: extra + page.hits, continuation: page.continuation) }
+                )
+                guard !Task.isCancelled, searchSource == catalogue else { return }
+                hits = page.hits
                 searchContinuationToken = page.continuation
             } catch {
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, searchSource == catalogue else { return }
                 AuthController.reportIfSessionExpired(error)
-                searchError = "Couldn't reach the music service. Check your connection and try again."
+                searchError = error.localizedDescription
                 hits = []
                 searchContinuationToken = nil
             }

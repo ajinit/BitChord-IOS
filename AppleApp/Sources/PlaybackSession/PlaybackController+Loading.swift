@@ -42,6 +42,8 @@ extension PlaybackController {
                 )
             }
         }
+        sequencingTask?.cancel()
+        sequencingGeneration &+= 1
         durationRepairTask?.cancel()
         recoveryNeedsFreshResolution = false
         if !freshResolution { recoveringEntryID = nil }

@@ -51,6 +51,11 @@ struct AutomixPerformancePage: View {
 
     var body: some View {
         List {
+            if AutomixResourcePolicy.constrainedDevice {
+                Text("This device uses Efficient mode to avoid excessive Automix memory use. Beat tracking remains available; vocal analysis and Core ML acceleration are skipped.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
             ForEach(modes, id: \.0) { mode in
                 Button {
                     selection = mode.0
@@ -64,13 +69,14 @@ struct AutomixPerformancePage: View {
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        if selection == mode.0 {
+                        if AutomixResourcePolicy.mode(selection) == mode.0 {
                             Image(systemName: "checkmark")
                                 .fontWeight(.semibold)
                                 .foregroundStyle(Color.accentColor)
                         }
                     }
                 }
+                .disabled(AutomixResourcePolicy.constrainedDevice && mode.0 != "EFFICIENT")
             }
         }
         .navigationTitle("Automix Performance")

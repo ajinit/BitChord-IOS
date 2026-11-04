@@ -243,12 +243,12 @@ extension PlaybackController {
 
     func setAutomixPerformanceMode(_ mode: String) {
         let valid = mode == "EFFICIENT" || mode == "PERFORMANCE" ? mode : "BALANCED"
-        automixPerformanceMode = valid
+        automixPerformanceMode = AutomixResourcePolicy.mode(valid)
         PlatformSettings.shared.putString(key: "automix_performance", value: valid)
-        engine.setAutomixPerformance(mode: valid)
+        engine.setAutomixPerformance(mode: automixPerformanceMode)
         Task { [weak self] in
             guard let self else { return }
-            await reloadAutomixModels(playbackStarted: self.started)
+            await reloadAutomixModels(playbackStarted: self.automixPlaybackReady)
             if self.automixEnabled { self.syncEngineQueueNext() }
         }
     }

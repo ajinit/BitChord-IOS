@@ -62,6 +62,24 @@ object SourceResolverBridge {
      */
     fun canSubstituteForYouTube(): Boolean = runCatching { SourceResolver.canSubstituteForYouTube() }.getOrDefault(false)
 
+    /** The Sources switch is authoritative for direct search and playback too. */
+    fun jioSaavnEnabled(): Boolean = runCatching {
+        SourceRegistry.active().any { it.kind == SourceKind.JIOSAAVN }
+    }.getOrDefault(false)
+
+    /** A legacy saavn: search row, resolved by the same provider API as substitutions. */
+    fun resolveJioSaavnTrack(trackId: String, downloadQuality: String?, callback: StreamCallback) = lookup(callback) {
+        val request = if (downloadQuality == null) SourceResolver.requestForNow()
+        else SourceResolver.requestForDownload(
+            com.music.bitchord.data.settings.DownloadQuality.fromName(downloadQuality),
+        )
+        // Explicit catalogue selection supports capped AAC even when the
+        // automatic substitution policy only asks YouTube at this ceiling.
+        withTimeoutOrNull(25_000) {
+            DirectSourcePlayback.jioSaavn(SourceRegistry.active(), trackId, request)
+        }
+    }
+
     /** A stream that genuinely satisfies the request, for a track already playing. */
     fun worthSwapping(candidateJson: String, playingJson: String?): Boolean {
         val candidate = readFormat(candidateJson) ?: return false

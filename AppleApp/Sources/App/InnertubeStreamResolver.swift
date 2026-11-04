@@ -130,7 +130,7 @@ final class InnertubeStreamResolver: Sendable {
         ///
         /// Same rule as the party screen's `describe`: the server's own words when it
         /// sent any, otherwise a statement of what failed and never the raw error.
-        /// YouTube's "confirm you're not a bot": about the network, not the track.
+        /// This response does not establish whether the network or session caused it.
         static func isBotCheck(_ error: Error) -> Bool {
             ((error as? StreamError)?.raw ?? "\(error)").localizedCaseInsensitiveContains("not a bot")
         }
@@ -144,7 +144,7 @@ final class InnertubeStreamResolver: Sendable {
                 return "Playback is temporarily unavailable. Try again shortly."
             }
             if said.contains("not a bot") {
-                return "YouTube is asking this network to confirm it isn’t a bot, so it won’t serve audio for now. Switching between Wi-Fi and mobile data, or waiting a while, usually clears it."
+                return "YouTube refused audio with a bot-verification request. Changing networks may not help. Try again later, choose a JioSaavn search result directly if enabled, or play your own local music."
             }
             if said.contains("sign in") {
                 return "YouTube is asking this device to sign in before it will serve anything. That is YouTube's gate rather than anything to do with the track."
