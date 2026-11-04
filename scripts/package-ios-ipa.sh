@@ -56,6 +56,10 @@ xcodebuild \
   CODE_SIGNING_REQUIRED=NO \
   CODE_SIGN_IDENTITY=
 [[ -d "$app" ]] || fail "archive did not contain BitChord.app: $app"
+# Retain symbols so a tester's .ips crash report can be symbolicated.
+if [[ -d "$archive/dSYMs" ]]; then
+  ditto -c -k --keepParent "$archive/dSYMs" "$output_dir/BitChord-debug-symbols.zip"
+fi
 plist="$app/Info.plist"
 short_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist")"
 [[ "$short_version" == "$version" ]] || fail "archive is version $short_version, not requested version $version"

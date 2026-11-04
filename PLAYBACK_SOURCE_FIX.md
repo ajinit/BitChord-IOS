@@ -1,3 +1,13 @@
+## Build 15 follow-up (device report)
+
+Build 14 did not resolve the tester's YouTube refusal and the tester reports termination to the Home Screen. The crash cause is **unconfirmed pending an iOS .ips report**; do not describe build 15 as a verified crash fix.
+
+Reproduced by source inspection: JioSaavn results were only added to Songs, not All; iPhone source picker vanished after typing; history rebuilt provider keys as YouTube entries; QueueEntry.videoId exposed provider keys to YouTube background work. Build 15 adds a permanent JioSaavn search choice, includes alternatives in All, preserves history routing, and excludes provider keys from videoId. Direct search never calls YouTube, including empty or failed provider searches. Provider search failures are distinguished from an empty catalogue. Playback failures use a readable alert instead of a truncated toast. Build archives retain dSYM symbols for diagnosing device reports.
+
+Ordinary live JioSaavn API probe returned a successful provider audio token and HTTP 206 audio/mp4 bytes for a catalogue karaoke recording. Queries for the tester's exact Silica Gel and Sabrina Carpenter recordings returned no matching recording; Maroon 5 returned karaoke versions. This is evidence of provider transport availability on the laptop, not successful iPhone playback or availability of those original recordings. No automatic substitution with covers is permitted.
+
+Regression checks cover direct provider isolation, empty/error behavior, mixed results, fallback, disabled providers, cancellation, and persisted provider/YouTube keys. Windows cannot run the Swift or iOS binary; hosted Mac checks and device testing remain required.
+
 # BitChord iOS playback investigation
 
 Investigated on 3 November 2026. Installed app reported by the listener: iOS 1.0.4, build 13, signed on Windows with Sideloadly. Base: `898d8ed746b1bfdeb26a4c2d24484844241ed990` (`main`). Local branch: `fix/playback-source-failures`.

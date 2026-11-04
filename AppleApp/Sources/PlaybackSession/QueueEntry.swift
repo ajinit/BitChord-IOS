@@ -46,7 +46,7 @@ struct QueueEntry: Identifiable, Hashable, Sendable, Codable {
 
     var videoId: String? {
         if source.hasPrefix("yt:") { return String(source.dropFirst(3)) }
-        if isLocal { return nil }
+        if isLocal || source.hasPrefix("saavn:") || source.hasPrefix("src:") { return nil }
         return id
     }
 
@@ -66,6 +66,16 @@ struct QueueEntry: Identifiable, Hashable, Sendable, Codable {
             return true
         }
         return false
+    }
+
+    /// History stores catalogue keys, not exclusively YouTube video IDs.
+    static func catalogue(key: String, title: String, artist: String, thumbnailUrl: String? = nil) -> QueueEntry {
+        if key.hasPrefix("saavn:") || key.hasPrefix("src:") {
+            return QueueEntry(id: key, title: title, artist: artist, source: key,
+                thumbnailUrl: thumbnailUrl, artworkData: nil, isLocal: false)
+        }
+        return youtube(videoId: key.hasPrefix("yt:") ? String(key.dropFirst(3)) : key,
+            title: title, artist: artist, thumbnailUrl: thumbnailUrl)
     }
 
     static func youtube(

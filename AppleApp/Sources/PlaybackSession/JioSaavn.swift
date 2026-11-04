@@ -7,7 +7,12 @@ enum JioSaavn {
     private static let ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36"
 
     static func search(_ query: String) async -> [SearchHitDTO] {
-        guard enabled, !Task.isCancelled else { return [] }
+        (try? await searchChecked(query)) ?? []
+    }
+
+    static func searchChecked(_ query: String) async throws -> [SearchHitDTO] {
+        guard enabled else { throw SearchFailure.disabled }
+        try Task.checkCancellation()
         var comps = URLComponents(string: base)!
         comps.queryItems = [
             .init(name: "__call", value: "search.getResults"),
@@ -24,11 +29,12 @@ enum JioSaavn {
         req.timeoutInterval = 12
         req.setValue(ua, forHTTPHeaderField: "User-Agent")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
-        guard let (data, response) = try? await URLSession.shared.data(for: req),
-              (response as? HTTPURLResponse)?.statusCode == 200,
-              enabled, !Task.isCancelled,
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let results = obj["results"] as? [[String: Any]] else { return [] }
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try Task.checkCancellation()
+        guard enabled else { throw SearchFailure.disabled }
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw SearchFailure.unavailable }
+        guard let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let results = obj["results"] as? [[String: Any]] else { throw SearchFailure.unavailable }
         return results.compactMap { raw in
             guard let id = raw["id"] as? String, let title = raw["title"] as? String else { return nil }
             let info = raw["more_info"] as? [String: Any]
@@ -59,6 +65,16 @@ enum JioSaavn {
                 isVideo: false,
                 setVideoId: nil
             )
+        }
+    }
+
+    private enum SearchFailure: LocalizedError {
+        case disabled, unavailable
+        var errorDescription: String? {
+            switch self {
+            case .disabled: return "Enable JioSaavn in Settings → Sources."
+            case .unavailable: return "JioSaavn did not return a search response. Please try again later."
+            }
         }
     }
 
