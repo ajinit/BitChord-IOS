@@ -55,8 +55,8 @@ extension PlaybackController {
             index = 0
         }
         let ordered = PlaybackQueuePolicy.orderList(
-            entries, after: index, automix: automixSequencingEnabled,
-            shuffle: useShuffle, scores: tasteScores(entries)
+            entries, after: index, automix: false,
+            shuffle: useShuffle, scores: []
         )
         contextContinuationTask?.cancel()
         contextContinuationTask = nil

@@ -53,6 +53,8 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/check-source-recovery.sh
+          bash scripts/check-automix-startup.sh
+          bash scripts/check-queue.sh
           ./gradlew :shared:macosArm64Test --max-workers=2
           ./gradlew --stop
 

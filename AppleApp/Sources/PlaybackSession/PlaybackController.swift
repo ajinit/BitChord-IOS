@@ -694,11 +694,8 @@ final class PlaybackController {
     func startEngineIfNeeded() {
         guard !started else { return }
         started = true
-        Task { [weak self] in
-            guard let self else { return }
-            await reloadAutomixModels(playbackStarted: self.started)
-            if self.automixEnabled { self.syncEngineQueueNext() }
-        }
+        // Automix starts only after a track successfully loads. A failed
+        // stream resolution must not start analysis or model configuration.
         // Engine start touches HAL / cpal which blocks (~1s) and triggers
         // Thread Performance Checker if done on main. Run on utility QoS
         // so it doesn't outrank the Default QoS cpal monitor thread

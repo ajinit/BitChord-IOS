@@ -18,6 +18,8 @@ struct RootView: View {
     @Environment(ToastCenter.self) private var toast
     @State private var playbackFailure: String = ""
     @State private var showingPlaybackFailure = false
+    @State private var playbackFailureURL: URL?
+    @Environment(\.openURL) private var openURL
     @State private var updateChecker = UpdateChecker.shared
     #if os(macOS)
     /// Which side panel is open beside the library, if any (M4).
@@ -244,10 +246,14 @@ struct RootView: View {
         // Keep the full failure readable; the two-line toast hid recovery advice.
         .onChange(of: controller.lastError) { _, message in
             guard let message, !message.isEmpty else { return }
+            playbackFailureURL = controller.current.flatMap { YouTubePlaybackLink.url(source: $0.source) }
             playbackFailure = message
             showingPlaybackFailure = true
         }
         .alert("Playback unavailable", isPresented: $showingPlaybackFailure) {
+            if let url = playbackFailureURL {
+                Button("Open in YouTube Music") { openURL(url) }
+            }
             Button("OK", role: .cancel) { }
         } message: {
             Text(playbackFailure)

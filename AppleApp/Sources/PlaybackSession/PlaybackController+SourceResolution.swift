@@ -341,7 +341,7 @@ extension PlaybackController {
                 ? "An alternative was found, but BitChord cannot verify that it is the same recording without the original audio."
                 : "Enabled sources did not supply a verified replacement."
             throw InnertubeStreamResolver.StreamError(
-                message: "YouTube refused audio with a bot-verification request. \(reason) Choose a JioSaavn search result directly if enabled, or play your own local music.",
+                message: "YouTube refused audio with a bot-verification request. \(reason) Use Open in YouTube Music to open this recording in the official service, or select a track directly from another source.",
                 raw: (error as? InnertubeStreamResolver.StreamError)?.raw ?? String(describing: error)
             )
         }

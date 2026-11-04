@@ -1,3 +1,15 @@
+## Build 16: Automix first-play safeguard and official-service action
+
+The tester isolated app termination to Automix being enabled, on first Play before audio, without optional models downloaded. No .ips report has been provided, so the process termination cause is not confirmed.
+
+Automix model configuration is no longer launched merely because the audio engine starts. Initial queue installation does not run Automix ranking/taste queries; sequencing requires a matching successfully loaded track and usable source. New loads and failures invalidate pending sequencing. Models are initialized after load success. The model loader makes empty initial configuration a no-op, reuses an unchanged configuration, and rejects a stale Core ML recompilation after a newer configuration/disable. The latter is a concrete actor-reentrancy bug, independently testable with a suspended compiler mock; it does not explain this tester's no-model scenario.
+
+A YouTube playback failure now offers an explicit Open in YouTube Music action for the same validated video ID. This opens the official service; it does not make BitChord's native extraction succeed or bypass a verification request. Automatic substitution still requires recording verification. No unrelated catalogue is presented as a guaranteed replacement.
+
+Addon research: the add-source box expects a hosted BitChord manifest/search/stream service, not an arbitrary GitHub package or a Subsonic URL. The MIT project https://github.com/rairulyle/bitchord-selfhosted-addon documents Jellyfin/Plex support and requires the listener's own server and music; its README describes Android usage, so iOS compatibility still needs testing. Navidrome support is listed as a roadmap item. No verified ready-made addon offering the requested full commercial catalogue was found. No addon or server was installed.
+
+New tests exercise first-play/refusal/stale-track readiness, no-model setup, repeated configuration, disable during async recompilation, and official-link validation. Build 16 is a testable safeguard, not a confirmed fix for the unreported device crash.
+
 ## Build 15 follow-up (device report)
 
 Build 14 did not resolve the tester's YouTube refusal and the tester reports termination to the Home Screen. The crash cause is **unconfirmed pending an iOS .ips report**; do not describe build 15 as a verified crash fix.

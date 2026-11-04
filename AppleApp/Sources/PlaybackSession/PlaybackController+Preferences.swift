@@ -248,7 +248,7 @@ extension PlaybackController {
         engine.setAutomixPerformance(mode: valid)
         Task { [weak self] in
             guard let self else { return }
-            await reloadAutomixModels(playbackStarted: self.started)
+            await reloadAutomixModels(playbackStarted: self.automixPlaybackReady)
             if self.automixEnabled { self.syncEngineQueueNext() }
         }
     }

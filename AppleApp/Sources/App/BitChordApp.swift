@@ -146,7 +146,7 @@ struct BitChordApp: App {
                         await AutomixModelStore.shared.refresh()
                         AutomixModelStore.shared.onChanged = {
                             Task {
-                                await reloadAutomixModels(playbackStarted: controller.started)
+                                await reloadAutomixModels(playbackStarted: controller.automixPlaybackReady)
                                 if controller.automixEnabled { controller.syncEngineQueueNext() }
                             }
                         }

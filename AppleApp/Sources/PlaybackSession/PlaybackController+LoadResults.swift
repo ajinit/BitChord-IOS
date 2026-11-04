@@ -120,6 +120,13 @@ extension PlaybackController {
         // seconds late, then full analysis delayed queueing it even further.
         syncEngineQueueNext()
         scheduleSequencing()
+        let generation = playGeneration
+        Task { [weak self] in
+            guard let self, self.playGeneration == generation, self.automixPlaybackReady else { return }
+            await reloadAutomixModels(playbackStarted: self.automixPlaybackReady)
+            guard self.playGeneration == generation, self.automixPlaybackReady else { return }
+            if self.automixEnabled { self.syncEngineQueueNext() }
+        }
     }
 
     /// Legacy cached WebM files can lack both container and saved duration.
@@ -145,6 +152,8 @@ extension PlaybackController {
     }
 
     func loadDidFail(entry: QueueEntry, error: Error) {
+        sequencingTask?.cancel()
+        sequencingGeneration &+= 1
         if let pending = pendingPlaybackLatency, pending.entryID == entry.id {
             let resolved = pending.resolvedAt.map { String(format: "%.0fms", ($0 - pending.startedAt) * 1_000) } ?? "unresolved"
             PlaybackDebugLog.shared.record(
