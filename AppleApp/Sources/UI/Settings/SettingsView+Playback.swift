@@ -172,9 +172,9 @@ extension SettingsView {
                 SettingsLine(
                     glyph: .cpu,
                     title: "Automix Performance",
-                    subtitle: "CPU inference budget — up to \(controller.automixInferenceThreads) worker\(controller.automixInferenceThreads == 1 ? "" : "s")"
+                    subtitle: AutomixResourcePolicy.constrainedDevice ? "Efficient mode protects this device from excessive Automix memory use." : "CPU inference budget — up to \(controller.automixInferenceThreads) worker\(controller.automixInferenceThreads == 1 ? "" : "s")"
                 ) {
-                    Text(Self.automixPerfLabel(automixPerf))
+                    Text(Self.automixPerfLabel(controller.automixPerformanceMode))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -217,6 +217,9 @@ extension SettingsView {
         let beat = store.status(of: .beat).isInstalled
         let vocals = store.status(of: .vocals).isInstalled
         let accelerated = store.status(of: .beatCoreML).isInstalled
+        if AutomixResourcePolicy.constrainedDevice, beat {
+            return "Beat model active in Efficient mode. Vocal and acceleration models stay on disk to protect memory."
+        }
         switch (beat, vocals) {
         case (true, true):
             if accelerated {

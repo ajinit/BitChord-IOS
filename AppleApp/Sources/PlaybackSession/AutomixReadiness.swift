@@ -21,3 +21,23 @@ enum YouTubePlaybackLink {
         return url.url
     }
 }
+
+/// On iPhones with up to 4 GiB, the full model combination can exceed the
+/// per-process memory limit during startup. Keep beat tracking, but use the
+/// existing Efficient path without vocals or the Core ML accelerator.
+enum AutomixResourcePolicy {
+    static var constrainedDevice: Bool {
+        #if os(iOS)
+        return isConstrained(isIOS: true, physicalMemory: ProcessInfo.processInfo.physicalMemory)
+        #else
+        return false
+        #endif
+    }
+    static func isConstrained(isIOS: Bool, physicalMemory: UInt64) -> Bool {
+        isIOS && physicalMemory <= 4 * 1024 * 1024 * 1024
+    }
+    static func mode(_ requested: String, constrained: Bool = constrainedDevice) -> String {
+        if constrained { return "EFFICIENT" }
+        return requested == "EFFICIENT" || requested == "PERFORMANCE" ? requested : "BALANCED"
+    }
+}

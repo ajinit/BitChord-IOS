@@ -428,7 +428,7 @@ final class PlaybackController {
     /// CPU budget for Automix's background analysis (EFFICIENT / BALANCED /
     /// PERFORMANCE). EFFICIENT skips the vocal model; the 1 / 2 / 4 thread
     /// counts are upstream's ORT numbers, reported for the analysis path.
-    var automixPerformanceMode = PlatformSettings.shared.getString(key: "automix_performance", default: "BALANCED")
+    var automixPerformanceMode = AutomixResourcePolicy.mode(PlatformSettings.shared.getString(key: "automix_performance", default: "BALANCED"))
     /// Fixed effect phrase length in bars; zero keeps the analyzer's adaptive windows.
     var automixPhraseBars: Int = {
         let stored = Int(PlatformSettings.shared.getInt(key: "automix_phrase_bars", default: 0))
@@ -723,7 +723,7 @@ final class PlaybackController {
                     enabled: PlatformSettings.shared.getBoolean(key: "prefer_usb_dac", default: false)
                 )
                 eng.setAutomixPerformance(
-                    mode: PlatformSettings.shared.getString(key: "automix_performance", default: "BALANCED")
+                    mode: AutomixResourcePolicy.mode(PlatformSettings.shared.getString(key: "automix_performance", default: "BALANCED"))
                 )
                 let storedPhraseBars = PlatformSettings.shared.getInt(key: "automix_phrase_bars", default: 0)
                 let phraseBars = storedPhraseBars == 8 || storedPhraseBars == 16 ? storedPhraseBars : 0

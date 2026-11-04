@@ -27,6 +27,17 @@ actor AutomixModelStore {
 
 @main struct VerifyAutomixStartup {
     static func main() async {
+        let fourGiB: UInt64 = 4 * 1024 * 1024 * 1024
+        precondition(AutomixResourcePolicy.isConstrained(isIOS: true, physicalMemory: fourGiB))
+        precondition(!AutomixResourcePolicy.isConstrained(isIOS: true, physicalMemory: fourGiB + 1))
+        precondition(!AutomixResourcePolicy.isConstrained(isIOS: false, physicalMemory: fourGiB))
+        precondition(AutomixResourcePolicy.mode("PERFORMANCE", constrained: true) == "EFFICIENT")
+        precondition(AutomixResourcePolicy.mode("PERFORMANCE", constrained: false) == "PERFORMANCE")
+        let safe = AutomixModelPolicy.paths(beat: "beat", vocal: "vocal",
+            accelerator: AutomixAccelerator(modelURL: URL(fileURLWithPath: "/working"), identity: "heavy"),
+            playbackStarted: true, enabled: true,
+            efficient: AutomixResourcePolicy.mode("BALANCED", constrained: true) == "EFFICIENT")
+        precondition(safe.beat == "beat" && safe.vocal.isEmpty && safe.accelerator == nil)
         // First play / refusal / stale previous track must never permit analysis.
         precondition(!AutomixReadiness.canPrepare(currentID: "new", loadedID: nil, source: nil, transportReady: false))
         precondition(!AutomixReadiness.canPrepare(currentID: "new", loadedID: "old", source: "/old", transportReady: true))
@@ -58,6 +69,6 @@ actor AutomixModelStore {
         await AutomixModelStore.shared.finish()
         _ = await pending.value
         precondition(installedIdentity.isEmpty, "Stale compilation re-enabled the disabled accelerator")
-        print("PASS Automix startup readiness, empty-model no-op, model reuse, disable-during-rebuild, and official playback links")
+        print("PASS memory-constrained Automix model selection, startup readiness, empty-model no-op, model reuse, disable-during-rebuild, and official playback links")
     }
 }

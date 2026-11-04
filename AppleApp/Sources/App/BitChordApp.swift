@@ -355,7 +355,7 @@ func reloadAutomixModels(playbackStarted: Bool) async {
     let paths = AutomixModelStore.shared.analyzerPaths
     let accelerator = AutomixModelStore.shared.beatCoreML
     let enabled = PlatformSettings.shared.getBoolean(key: "smart_fade_enabled", default: true)
-    let efficient = PlatformSettings.shared.getString(key: "automix_performance", default: "BALANCED") == "EFFICIENT"
+    let efficient = AutomixResourcePolicy.mode(PlatformSettings.shared.getString(key: "automix_performance", default: "BALANCED")) == "EFFICIENT"
     let selected = AutomixModelPolicy.paths(beat: paths.beat, vocal: paths.vocal,
         accelerator: accelerator, playbackStarted: playbackStarted, enabled: enabled, efficient: efficient)
     let ready = await AutomixModelLoader.shared.configure(

@@ -1,3 +1,13 @@
+## Build 17: confirmed iPhone memory-limit termination
+
+USB device logging reproduced termination on the installed build 15. iOS reported BitChord exceeding its ActiveHard 2098 MB limit and being killed for per-process-limit at approximately 2,148,356 KB. App diagnostics show beat and vocal models loaded immediately before termination; the installed-model record includes the Core ML accelerator as well. Contrary to the initial assumption, all optional models were present on the phone.
+
+Control test on the same iPhone: Automix ON with Advanced Options → Automix Performance → Efficient stayed open, as confirmed by the tester. App logs show only the beat model loading, followed by a handled YouTube refusal. This identifies the full model configuration as the memory problem; the exact allocation within vocals/Core ML has not been profiled.
+
+Build 17 automatically applies the existing Efficient policy on iOS devices with up to 4 GiB physical memory. All entry points (startup, preference changes, model selection and planner settings) use the effective mode. Beat tracking remains available; vocals and Core ML are excluded and inference is limited to one worker. Settings explains the restriction and does not offer an ineffective higher mode. Downloaded model files are retained. Larger-memory devices and macOS keep their requested mode.
+
+Regression checks cover the memory threshold/platform boundary, effective mode, and actual model selection. Build 16's startup guards/model reuse/stale-rebuild fix and explicit official YouTube Music action are retained. The YouTube extraction refusal remains unresolved; the official-service action is an external fallback for the exact recording, not an in-app extraction repair. Raw device logs and signing/account identifiers are kept local.
+
 ## Build 16: Automix first-play safeguard and official-service action
 
 The tester isolated app termination to Automix being enabled, on first Play before audio, without optional models downloaded. No .ips report has been provided, so the process termination cause is not confirmed.
